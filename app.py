@@ -4,9 +4,10 @@ import os
 import shutil
 import pymupdf
 import json
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 st.set_page_config(
-    page_title="Grounding Task Demo",
+    page_title="MGVG Grounding Demo",
     layout="wide",
     initial_sidebar_state="expanded",
     page_icon="logo.png"
@@ -93,7 +94,15 @@ def get_ocr_model():
 
 @st.cache_resource
 def get_llm_model(device):
-    return pipeline("text-generation", model="meta-llama/Meta-Llama-3.1-8B-Instruct", device=device)
+    model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"  # or your quantized model id
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        device_map="auto",  # or "cuda" if you want to force GPU
+        load_in_4bit=True,  # or load_in_8bit=True for 8-bit
+        torch_dtype="auto"
+    )
+    return pipeline("text-generation", model=model, tokenizer=tokenizer)
 
 from predict_output import predict_output
 
@@ -119,19 +128,23 @@ def get_corresponding_bboxes(image, question):
 # --- Helper to draw bboxes ---
 def draw_bboxes(image, bboxes, color):
     img = image.copy()
+    # width proportional to the image size
+    width = int(img.width/100)
     draw = ImageDraw.Draw(img)
     for bbox in bboxes:
-        draw.rectangle(bbox, outline=color, width=4)
+        draw.rectangle(bbox, outline=color, width=width)
     return img
 
 def draw_points(image, bboxes, color):
     img = image.copy()
+    width = int(img.width)
     draw = ImageDraw.Draw(img)
     for bbox in bboxes:
         # x1, y1, x2, y2 = bbox
         cx, cy = bbox[0], bbox[1]
-        r = 6
-        draw.ellipse((cx-r, cy-r, cx+r, cy+r), outline=color, width=4, fill=color)
+        # r being relative to the image size
+        r = int(img.width/100)
+        draw.ellipse((cx-r, cy-r, cx+r, cy+r), outline=color, width=width, fill=color)
     return img
 
 # model_type = st.sidebar.checkbox("Use LLM Model", value=False)
@@ -171,7 +184,7 @@ col_logo, col_title = st.columns([1, 8])
 with col_logo:
     st.image("logo.png", width=180)
 with col_title:
-    st.markdown("<h1 style='margin-bottom: 0;'>Question Answering with Visual Grounding</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='margin-bottom: 0;'>MGVG - Multi-Granular Visual Grounding</h1>", unsafe_allow_html=True)
 
 # List of quotes (HTML formatted)
 QUOTES = [
@@ -304,17 +317,18 @@ with col2:
         block_img = draw_bboxes(image, block_bboxes, color="#4F8BF9")
         line_img = draw_bboxes(image, line_bboxes, color="#F97B4F")
         word_img = draw_bboxes(image, word_bboxes, color="#4FF9B2")
-        point_img = draw_points(image, point_bboxes, color="#F94F8B")
+        point_img = draw_points(image, point_bboxes, color="#FFFF00")
         imgs = [block_img, line_img, word_img, point_img]
         labels = ["Block Level", "Line Level", "Word Level", "Point Level"]
         cols = st.columns(4)
         for i, (img, label) in enumerate(zip(imgs, labels)):
             with cols[i]:
                 st.image(img, caption=label, use_container_width=True)
+        answer_lines = answer.splitlines()
         st.markdown("""
         <div style='background: #f1f5fa; border-radius: 10px; padding: 1em 2em; border: 1.5px solid #4F8BF9;'>
             <h4 style='color: #4F8BF9;'>Predicted Answer:</h4>
-            <p style='font-size: 1.2em; color: #222;'>""" + answer + """</p>
+            <p style='font-size: 1.2em; color: #222;'>""" + "<br>".join(answer_lines) + """</p>
         </div>
         """, unsafe_allow_html=True)
 

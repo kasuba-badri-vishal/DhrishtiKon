@@ -16,8 +16,8 @@ from time import time
 pipe = None
 layout_predictor = None
 
-MAX_BLOCK_MATCHES = 1
-MAX_LINE_MATCHES = 10
+MAX_BLOCK_MATCHES = 2
+MAX_LINE_MATCHES = 5
 CUT_OFF_THRESHOLD = 70
 QUESTION_WEIGHT = 0.2
 ANSWER_WEIGHT = 0.8
@@ -135,11 +135,12 @@ def get_matched_regions(question_text, target_text, predictions, level):
             matched_regions.append(region_copy)
 
 
+
     matched_regions.sort(key=lambda x: x['match_score'], reverse=True)
     
     # If no matches, reduce threshold by 20 and get the topmost single output
     if not matched_regions:
-        new_threshold = max(CUT_OFF_THRESHOLD - 20, 0)  # Prevent negative threshold
+        new_threshold = max(CUT_OFF_THRESHOLD - 30, 0)  # Prevent negative threshold
         matched_regions = [region for region in matched_regions if region['match_score'] >= new_threshold]
         matched_regions.sort(key=lambda x: x['match_score'], reverse=True)
         if matched_regions:
@@ -152,10 +153,10 @@ def get_matched_regions(question_text, target_text, predictions, level):
     return top_matches
 
 
-def get_processed_text_for_llm(block_predictions):
+def get_processed_text_for_llm(block_predictions, gap):
     final_text = ""
     for block_data in block_predictions:
-        final_text += block_data['text'] + "\n\n"
+        final_text += block_data['text'] + gap
     return final_text
 
 
@@ -182,11 +183,16 @@ def predict_output(document_path, question, pipe, layout_predictor, model, model
 
 
     curr_time = time()
-    line_predictions = get_line_predictions(document_path, model, document_type)
+    line_predictions, pages_count = get_line_predictions(document_path, model, document_type)
     line_time = time()
     print(f"Done with line predictions in {line_time - curr_time} seconds")
     curr_time = time()
-    block_predictions = get_block_predictions(document_path, layout_predictor, model, document_type)
+    if(document_type == "pdf" and pages_count < 3):
+        block_predictions = get_block_predictions(document_path, layout_predictor, model, document_type)
+        gap = '\n\n\n'
+    else:
+        block_predictions = line_predictions
+        gap = '\n'
     block_time = time()
     print(f"Done with block predictions in {block_time - line_time} seconds")
     # exit()
@@ -197,9 +203,10 @@ def predict_output(document_path, question, pipe, layout_predictor, model, model
     
     curr_time = time()
     if model_type == "MGVG" or document_type=="pdf":
-        processed_text_for_llm = get_processed_text_for_llm(block_predictions)
-        print("Processed Text for LLM: ", processed_text_for_llm)
+        processed_text_for_llm = get_processed_text_for_llm(block_predictions, gap=gap)
+        # print("Processed Text for LLM: ", processed_text_for_llm)
         predicted_answer = generate_llm_answer(question, processed_text_for_llm, pipe)
+        
     elif model_type == "IndoDocs":
         predicted_answer = generate_via_inhouse_model_answer(question, document_path)
     llm_time = time()
@@ -212,8 +219,11 @@ def predict_output(document_path, question, pipe, layout_predictor, model, model
 
     # print(predicted_answer)
     curr_time = time()
-    block_bboxes = get_matched_regions(question, predicted_answer, block_predictions, "block")
+    
     line_matches = get_matched_regions(question, predicted_answer, line_predictions, "line")
+
+    
+    block_bboxes = get_matched_regions(question, predicted_answer, block_predictions, "block")
     match_time = time()
     print(f"Done with match in {match_time - curr_time} seconds")
 
@@ -222,6 +232,9 @@ def predict_output(document_path, question, pipe, layout_predictor, model, model
         current_page = get_page_number(block_bboxes)
     else:
         current_page = -1
+
+    if(current_page != -1):
+        predicted_answer = "Answer predicted from page: " + str(current_page+1) + "\n" + predicted_answer
 
     block_box_predictions = []
     for match in block_bboxes:
@@ -233,8 +246,8 @@ def predict_output(document_path, question, pipe, layout_predictor, model, model
         if current_page == -1 or match['page'] == current_page:
             line_box_predictions.append(match['bbox'])
 
-    for line in line_box_predictions:
-        print(line)
+    # for line in line_box_predictions:
+    #     print(line)
 
     curr_time = time()
     word_box_predictions = get_word_level_matches(predicted_answer, top_k_matches=line_matches)
@@ -334,10 +347,10 @@ def generate_via_inhouse_model_answer(question, image_path, api_key="VISION-TEAM
 
 def generate_llm_answer(question, context, pipe):
 
-    prompt = f"""You are given a question and context. Your task is to find and return the best possible answer to the question using only the words present in the context as it is. 
-Do not generate summaries, paraphrased content, or any additional explanations including preamble and postamble. 
+    prompt = f"""You are given a question and context. Your task is to find and return the best possible answer to the question using only the context as it is. 
+Do not generate summaries, paraphrased content, or any additional explanations including any preamble and postamble. 
 Return only the exact phrase or sentence fragment from the context that answers the question. 
-If the answer is not found exactly as-is in the context, return: Answer not found in context.
+If the answer is not found in the context, return: Answer not found in context.
 
 Question: {question}
 Context: {context}
@@ -436,7 +449,7 @@ def get_line_predictions(document_path, model, document_type):
                     output['page'] = pages_count
                     line_predictions.append(output)
 
-    return line_predictions
+    return line_predictions, pages_count
 
 
 def get_block_predictions(document_path, layout_predictor, model, document_type):
@@ -464,7 +477,7 @@ def get_block_predictions(document_path, layout_predictor, model, document_type)
     else:
         
         images_path = [os.path.join(current_dir, document_path)]
-        print(images_path)
+        # print(images_path)
 
     block_predictions = []
     
