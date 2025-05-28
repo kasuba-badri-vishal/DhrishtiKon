@@ -5,23 +5,34 @@ import shutil
 import pymupdf
 import json
 from transformers import AutoTokenizer, AutoModelForCausalLM
+import datetime
+import logging
+
+from predict_output import clear_prediction_caches, predict_output
+
+from PIL import Image, ImageDraw
+from surya.layout import LayoutPredictor
+from doctr.models import ocr_predictor
+from transformers import pipeline
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 st.set_page_config(
-    page_title="MGVG Grounding Demo",
+    page_title="DrishtiKon Grounding Demo",
     layout="wide",
     initial_sidebar_state="expanded",
     page_icon="logo.png"
 )
 
-# --- Simple Authentication ---
-import streamlit as st
-import time
-
-# Define your valid credentials
-VALID_USERS = {
-    "iitb": "iitb123",
-    "badri": "badri123"
-}
+# Load credentials from secrets
+try:
+    VALID_USERS = st.secrets["credentials"]
+except Exception as e:
+    logger.error(f"Error loading credentials: {e}")
+    st.error("Error loading credentials. Please check your secrets configuration.")
+    st.stop()
 
 def login():
     # Set a professional background for the whole app
@@ -76,40 +87,54 @@ if not st.session_state["authenticated"]:
 
 # st.image("logo.png", width=250)
 
-from PIL import Image, ImageDraw
-import io
-# from st_audiorec import st_audiorec
-
-from surya.layout import LayoutPredictor
-from doctr.models import ocr_predictor
-from transformers import pipeline
-
 @st.cache_resource
 def get_layout_predictor():
-    return LayoutPredictor()
+    try:
+        return LayoutPredictor()
+    except Exception as e:
+        logger.error(f"Error loading layout predictor: {e}")
+        st.error("Error loading layout predictor model. Please try again later.")
+        return None
 
 @st.cache_resource
 def get_ocr_model():
-    return ocr_predictor(det_arch='db_resnet50', reco_arch='crnn_vgg16_bn', pretrained=True)
+    try:
+        return ocr_predictor(det_arch='db_resnet50', reco_arch='crnn_vgg16_bn', pretrained=True)
+    except Exception as e:
+        logger.error(f"Error loading OCR model: {e}")
+        st.error("Error loading OCR model. Please try again later.")
+        return None
 
 @st.cache_resource
 def get_llm_model(device):
-    model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"  # or your quantized model id
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        device_map="auto",  # or "cuda" if you want to force GPU
-        load_in_4bit=True,  # or load_in_8bit=True for 8-bit
-        torch_dtype="auto"
-    )
-    return pipeline("text-generation", model=model, tokenizer=tokenizer)
+    try:
+        model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+        tokenizer = AutoTokenizer.from_pretrained(model_id, token=st.secrets["hf_token"])
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            device_map="auto",
+            load_in_4bit=True,
+            torch_dtype="auto",
+            token=st.secrets["hf_token"]
+        )
+        return pipeline("text-generation", model=model, tokenizer=tokenizer)
+    except Exception as e:
+        logger.error(f"Error loading LLM model: {e}")
+        st.error("Error loading language model. Please check your Hugging Face token and try again.")
+        return None
 
-from predict_output import predict_output
-
-
-layout_predictor = get_layout_predictor()
-model = get_ocr_model()
-pipe = get_llm_model("cuda")
+# Initialize models with error handling
+try:
+    layout_predictor = get_layout_predictor()
+    model = get_ocr_model()
+    pipe = get_llm_model("cuda")
+    if not all([layout_predictor, model, pipe]):
+        st.error("Failed to initialize one or more models. Please try again later.")
+        st.stop()
+except Exception as e:
+    logger.error(f"Error initializing models: {e}")
+    st.error("Error initializing models. Please try again later.")
+    st.stop()
 
 print("Models loaded")
 
@@ -165,6 +190,11 @@ st.markdown("""
         border-radius: 8px;
         font-size: 1.1rem;
         padding: 0.5em 2em;
+        transition: background 0.2s;
+        box-shadow: 0 2px 8px rgba(80, 120, 200, 0.08);
+    }
+    .stButton>button:hover {
+        background-color: #2b6cb0;
     }
     .stTextInput>div>input {
         border-radius: 8px;
@@ -177,14 +207,26 @@ st.markdown("""
     .stAudio>audio {
         width: 100% !important;
     }
+    .stDownloadButton>button {
+        background-color: #4FF9B2;
+        color: #222;
+        border-radius: 8px;
+        font-size: 1.1rem;
+        padding: 0.5em 2em;
+        margin-top: 1em;
+        transition: background 0.2s;
+    }
+    .stDownloadButton>button:hover {
+        background-color: #2b6cb0;
+        color: #fff;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-col_logo, col_title = st.columns([1, 8])
-with col_logo:
-    st.image("logo.png", width=180)
-with col_title:
-    st.markdown("<h1 style='margin-bottom: 0;'>MGVG - Multi-Granular Visual Grounding</h1>", unsafe_allow_html=True)
+# Center the title image
+col_left, col_center, col_right = st.columns([1, 4, 1])
+with col_center:
+    st.image("title.png", width=800, use_container_width=True)
 
 # List of quotes (HTML formatted)
 QUOTES = [
@@ -193,6 +235,29 @@ QUOTES = [
     </div>''',
     '''<div style="color: #2b6cb0; font-size: 1.3em; font-weight: 500; margin-bottom: 1em;">
         <i>"Truth is not told—it is seen."</i>
+    </div>''',
+    '''<div style="color: #2b6cb0; font-size: 1.3em; font-weight: 500; margin-bottom: 1em;">
+        "दृष्टया बुद्धिर्जायते" <span style="font-size:0.9em; color:#444;">(<i>From vision arises true understanding.</i>)</span>
+    </div>''',
+
+    '''<div style="color: #2b6cb0; font-size: 1.3em; font-weight: 500; margin-bottom: 1em;">
+        "तत्त्वमस्यि" — <i>That thou art</i>, seen not in words but in awakened awareness.
+    </div>''',
+
+    '''<div style="color: #2b6cb0; font-size: 1.3em; font-weight: 500; margin-bottom: 1em;">
+        "न चक्षुषा गृह्यते" <span style="font-size:0.9em; color:#444;">(<i>Not grasped by the eye, yet vision leads the way to it.)</i></span>
+    </div>''',
+
+    '''<div style="color: #2b6cb0; font-size: 1.3em; font-weight: 500; margin-bottom: 1em;">
+        <i>"To see rightly is to know rightly. The seer and the seen are not two."</i>
+    </div>''',
+
+    '''<div style="color: #2b6cb0; font-size: 1.3em; font-weight: 500; margin-bottom: 1em;">
+        "दर्शने दर्शनमेव साधनम्" <span style="font-size:0.9em; color:#444;">(<i>In vision alone is the path of vision fulfilled.)</i></span>
+    </div>''',
+
+    '''<div style="color: #2b6cb0; font-size: 1.3em; font-weight: 500; margin-bottom: 1em;">
+        <i>"What the eye of wisdom sees, no scripture can fully tell."</i>
     </div>'''
 ]
 
@@ -201,56 +266,77 @@ if "quote_index" not in st.session_state:
     st.session_state.quote_index = 0
     st.session_state.last_quote_time = time.time()
 
-# Check if 5 seconds have passed
-if time.time() - st.session_state.last_quote_time > 5:
+# Check if 2 seconds have passed
+if time.time() - st.session_state.last_quote_time > 2:
     st.session_state.quote_index = (st.session_state.quote_index + 1) % len(QUOTES)
     st.session_state.last_quote_time = time.time()
     # Rerun the app to update the quote
     if hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
 
-# Display the current quote
-st.markdown(QUOTES[st.session_state.quote_index], unsafe_allow_html=True)
+# Centered quote with animation
+col_left, col_center, col_right = st.columns([1, 3, 1])
+with col_center:
+    st.markdown(
+        f"""
+        <div style='
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 80px; 
+            font-size: 1.3em; 
+            font-weight: 500; 
+            color: #2b6cb0; 
+            text-align: center;
+            animation: fadeIn 1s;
+        '>
+            {QUOTES[st.session_state.quote_index]}
+        </div>
+        <style>
+        @keyframes fadeIn {{
+            from {{ opacity: 0; }}
+            to {{ opacity: 1; }}
+        }}
+        </style>
+        """, unsafe_allow_html=True
+    )
+
+quote_progress = min((time.time() - st.session_state.last_quote_time) / 2, 1.0)
+st.progress(quote_progress)
 
 col1, col2 = st.columns([1, 2])
 
 with col1:
-    st.subheader("1. Upload Image or pdf document")
+    st.markdown("<h2 style='color:#4F8BF9; font-size:2em; margin-bottom:0.5em;'>📤 1. Upload Image or PDF</h2>", unsafe_allow_html=True)
     image = "Not Uploaded"
     uploaded_file = st.file_uploader("Choose an image", type=["png", "jpg", "jpeg", "pdf"])
+    show_uploaded = False
     if uploaded_file:
         current_dir = os.getcwd()
         temp_output_folder = os.path.join(current_dir, "temp_output_folder/")
         # delete the temp_output_folder
         if os.path.exists(temp_output_folder):
             shutil.rmtree(temp_output_folder)
+        
+        clear_prediction_caches()  # Clear caches when new file is uploaded
 
         document_type = "image"
         if uploaded_file.type == "application/pdf":
-
-
             # save the uploaded file to a temp file
             temp_file_path = os.path.join(current_dir, "temp_file.pdf")
-
             # delete the temp_file_path
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
-
             with open(temp_file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
-            
             if not os.path.exists(temp_output_folder):
                 os.makedirs(temp_output_folder)
-            # output_file = simple_counter_generator("page", ".jpg")
-            # convert_from_path(document_path, output_folder=temp_output_folder, dpi=300, fmt='jpeg', jpegopt= jpg_options, output_file=output_file)
-
             pages = 0
             doc = pymupdf.open(temp_file_path)  # open document
             for page in doc:  # iterate through the pages
                 pages += 1
                 pix = page.get_pixmap()  # render page to an image
                 pix.save(f"{temp_output_folder}/{page.number}.png")
-
             if(pages == 1):
                 document_type = "image"
                 document_path = os.path.join(temp_output_folder, "0.png")
@@ -258,55 +344,126 @@ with col1:
                 image = Image.open(uploaded_file).convert("RGB")
             else:
                 document_type = "pdf"
-                # image = Image.open(uploaded_file).convert("RGB")
-        
         if document_type == "image":
             image = Image.open(uploaded_file).convert("RGB")
-            st.image(image, caption="Uploaded Image", use_container_width=True)
+            show_uploaded = st.checkbox("Show Uploaded Image", value=True)
+            if show_uploaded:
+                st.image(image, caption="Uploaded Image", use_container_width=True)
             # Save uploaded image to a temp file for predict_output
             temp_file_path = "sample.png"
             image.save(temp_file_path)
         else:
             document_type = "pdf"
             document_path = uploaded_file.name
+            show_uploaded = st.checkbox("Show Uploaded PDF Pages", value=True)
+            if show_uploaded and temp_output_folder is not None:
+                page_files = sorted([f for f in os.listdir(temp_output_folder) if f.endswith('.png')], key=lambda x: int(x.split('.')[0]))
+                if page_files:
+                    st.image([os.path.join(temp_output_folder, f) for f in page_files], caption=[f"Page {i}" for i in range(len(page_files))], use_container_width=True)
+                else:
+                    st.info("No PDF pages found.")
             image = "Uploaded PDF"
-            # st.image(uploaded_file, caption="Uploaded PDF", use_container_width=True)
     else:
         image = "Not Uploaded"
         temp_output_folder = None
         st.image("https://placehold.co/400x300?text=Upload+Image", caption="Uploaded Image", use_container_width=True)
 
     st.subheader("2. Ask a question")
-    question = st.text_input("Type your question here")
+    question = st.text_input("Type your question here", help="Ask a question about the uploaded document.")
     
     # Add radio button for model selection
     model_type = st.radio(
         "Select Model Type:",
-        options=["MGVG", "IndoDocs"],
+        options=["Drishtikon", "Patra"],
         index=1,
         horizontal=True
     )
 
     run_demo = st.button("Run Grounding Demo", use_container_width=True)
 
-# --- Output placeholders ---
+# --- Chat Management ---
+
+# Initialize session state for chat management
+if 'chat_history' not in st.session_state:
+    st.session_state['chat_history'] = []  # List of dicts: {question, answer, timestamp}
+if 'all_chats' not in st.session_state:
+    st.session_state['all_chats'] = []  # List of chat histories
+if 'current_chat_index' not in st.session_state:
+    st.session_state['current_chat_index'] = None  # None means current chat
+
+# --- Sidebar: Chat Controls and History ---
+with st.sidebar:
+    st.markdown("<h3 style='color:#4F8BF9;'>💬 Chat Controls</h3>", unsafe_allow_html=True)
+    if st.button('🆕 New Chat', key='sidebar_new_chat'):
+        if st.session_state['chat_history']:
+            st.session_state['all_chats'].append(list(st.session_state['chat_history']))
+        st.session_state['chat_history'] = []
+        st.session_state['current_chat_index'] = None
+        clear_prediction_caches()  # Clear caches when new chat is started
+    if st.button('🗑️ Clear Chat', key='sidebar_clear_chat'):
+        st.session_state['chat_history'] = []
+        st.session_state['current_chat_index'] = None
+    if st.button('🚪 Logout', key='sidebar_logout'):
+        st.session_state['authenticated'] = False
+        st.experimental_rerun() if hasattr(st, "experimental_rerun") else None
+    st.markdown("---")
+    st.markdown("<h4 style='color:#4F8BF9;'>🗂️ Chat History</h4>", unsafe_allow_html=True)
+    if st.session_state['all_chats']:
+        chat_options = [f"Chat {i+1} ({len(chat)} Q&A)" for i, chat in enumerate(st.session_state['all_chats'])]
+        selected = st.selectbox('View Old Chats', options=["Current Chat"] + chat_options, key='chat_select_sidebar')
+        if selected != "Current Chat":
+            idx = chat_options.index(selected)
+            st.session_state['current_chat_index'] = idx
+        else:
+            st.session_state['current_chat_index'] = None
+    else:
+        st.session_state['current_chat_index'] = None
+
+# Function to get the chat to display
+if st.session_state['current_chat_index'] is not None:
+    chat_to_display = st.session_state['all_chats'][st.session_state['current_chat_index']]
+else:
+    chat_to_display = st.session_state['chat_history']
+
+# --- Main Area: Image/PDF View Option ---
 with col2:
     st.subheader("3. Visual Grounding Outputs")
+    # Display chat history as Q&A cards
+    if chat_to_display:
+        for i, qa in enumerate(chat_to_display):
+            st.markdown(f"""
+            <div style='background: #f8fafc; border-radius: 10px; padding: 1em 1.5em; margin-bottom: 0.7em; border: 1.5px solid #4F8BF9;'>
+                <div style='color:#4F8BF9; font-weight:600;'>Q{i+1}: {qa['question']}</div>
+                <div style='color:#222; margin-top:0.5em;'><b>Answer:</b> {qa['answer']}</div>
+                <div style='font-size:0.9em; color:#888; margin-top:0.3em;'>🕒 {qa['timestamp']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No chat history yet. Ask a question to get started!")
+
     if image!="Not Uploaded" and (question):
         print(image)
         print(question)
     if run_demo and image!="Not Uploaded" and (question):
         # Use text input only
         q = question
-        answer, block_bboxes, line_bboxes, word_bboxes, point_bboxes, current_page = predict_output(
-            temp_file_path, q, pipe, layout_predictor, model, model_type, document_type
-        )
+        with st.spinner("Running Visual Grounding..."):
+            answer, block_bboxes, line_bboxes, word_bboxes, point_bboxes, current_page = predict_output(
+                temp_file_path, q, pipe, layout_predictor, model, model_type, document_type
+            )
 
+        # Append Q&A to chat history
+        st.session_state['chat_history'].append({
+            'question': q,
+            'answer': answer,
+            'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'block_bboxes': block_bboxes,
+            'line_bboxes': line_bboxes,
+            'word_bboxes': word_bboxes,
+            'point_bboxes': point_bboxes,
+            'current_page': current_page
+        })
 
-        # print(block_bboxes)
-        # print(line_bboxes)
-        # print(word_bboxes)
-        # print(point_bboxes)
         print(answer)
 
         if(current_page != -1):
@@ -353,20 +510,20 @@ with col2:
             )
     else:
         st.markdown("""
-        <div style='display: flex; gap: 2em; flex-wrap: wrap;'>
-            <div style='flex: 1; min-width: 220px;'>
+        <div style='display: flex; gap: 1em; justify-content: space-between;'>
+            <div style='flex: 1; min-width: 0;'>
                 <img src='https://placehold.co/220x180?text=Block+Level' style='width:100%; border-radius: 10px; border: 2px solid #4F8BF9;'>
                 <p style='text-align:center; font-weight:600;'>Block Level</p>
             </div>
-            <div style='flex: 1; min-width: 220px;'>
+            <div style='flex: 1; min-width: 0;'>
                 <img src='https://placehold.co/220x180?text=Line+Level' style='width:100%; border-radius: 10px; border: 2px solid #4F8BF9;'>
                 <p style='text-align:center; font-weight:600;'>Line Level</p>
             </div>
-            <div style='flex: 1; min-width: 220px;'>
+            <div style='flex: 1; min-width: 0;'>
                 <img src='https://placehold.co/220x180?text=Word+Level' style='width:100%; border-radius: 10px; border: 2px solid #4F8BF9;'>
                 <p style='text-align:center; font-weight:600;'>Word Level</p>
             </div>
-            <div style='flex: 1; min-width: 220px;'>
+            <div style='flex: 1; min-width: 0;'>
                 <img src='https://placehold.co/220x180?text=Point+Level' style='width:100%; border-radius: 10px; border: 2px solid #4F8BF9;'>
                 <p style='text-align:center; font-weight:600;'>Point Level</p>
             </div>
@@ -376,4 +533,4 @@ with col2:
             <h4 style='color: #4F8BF9;'>Predicted Answer:</h4>
             <p style='font-size: 1.2em; color: #222;'>[Answer will appear here]</p>
         </div>
-        """, unsafe_allow_html=True) 
+        """, unsafe_allow_html=True)

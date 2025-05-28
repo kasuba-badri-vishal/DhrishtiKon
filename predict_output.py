@@ -12,6 +12,7 @@ import pymupdf
 # from doctr.models import ocr_predictor
 import numpy as np
 from time import time
+import streamlit as st
 
 pipe = None
 layout_predictor = None
@@ -169,64 +170,54 @@ def get_page_number(block_bboxes):
             pages[block['page']] += 1
 
     print(pages)
-    max_page = max(pages, key=pages.get)
+    try : 
+        max_page = max(pages, key=pages.get)
+    except:
+        max_page = 0
     return max_page
 
 
-def predict_output(document_path, question, pipe, layout_predictor, model, model_type, document_type="image"):
-
+def predict_output(document_path, question, _pipe, _layout_predictor, _model, model_type, document_type="image"):
+    """Main prediction function that coordinates all predictions."""
     predicted_answer = None
     block_box_predictions = None
     line_box_predictions = None
     word_box_predictions = None
     point_box_predictions = None
 
-
     curr_time = time()
-    line_predictions, pages_count = get_line_predictions(document_path, model, document_type)
+    line_predictions, pages_count = cached_line_predictions(document_path, _model, document_type)
     line_time = time()
     print(f"Done with line predictions in {line_time - curr_time} seconds")
+    
     curr_time = time()
     if(document_type == "pdf" and pages_count < 3):
-        block_predictions = get_block_predictions(document_path, layout_predictor, model, document_type)
+        block_predictions = cached_block_predictions(document_path, _layout_predictor, _model, document_type)
         gap = '\n\n\n'
     else:
         block_predictions = line_predictions
         gap = '\n'
     block_time = time()
     print(f"Done with block predictions in {block_time - line_time} seconds")
-    # exit()
 
-    # print(line_predictions)
-    # print(block_predictions)
-
-    
     curr_time = time()
-    if model_type == "MGVG" or document_type=="pdf":
+    if model_type == "Drishtikon" or document_type=="pdf":
         processed_text_for_llm = get_processed_text_for_llm(block_predictions, gap=gap)
-        # print("Processed Text for LLM: ", processed_text_for_llm)
-        predicted_answer = generate_llm_answer(question, processed_text_for_llm, pipe)
-        
-    elif model_type == "IndoDocs":
+        predicted_answer = generate_llm_answer(question, processed_text_for_llm, _pipe)
+    elif model_type == "Patra":
         predicted_answer = generate_via_inhouse_model_answer(question, document_path)
     llm_time = time()
     print(f"Done with LLM in {llm_time - curr_time} seconds")
 
     print("LLM Answer: ", predicted_answer)
-    
 
     total_algo_time = time()
-
-    # print(predicted_answer)
     curr_time = time()
     
     line_matches = get_matched_regions(question, predicted_answer, line_predictions, "line")
-
-    
     block_bboxes = get_matched_regions(question, predicted_answer, block_predictions, "block")
     match_time = time()
     print(f"Done with match in {match_time - curr_time} seconds")
-
 
     if document_type == "pdf":
         current_page = get_page_number(block_bboxes)
@@ -242,12 +233,8 @@ def predict_output(document_path, question, pipe, layout_predictor, model, model
 
     line_box_predictions = []
     for match in line_matches:
-        # print(match['page'], match['bbox'])
         if current_page == -1 or match['page'] == current_page:
             line_box_predictions.append(match['bbox'])
-
-    # for line in line_box_predictions:
-    #     print(line)
 
     curr_time = time()
     word_box_predictions = get_word_level_matches(predicted_answer, top_k_matches=line_matches)
@@ -260,14 +247,6 @@ def predict_output(document_path, question, pipe, layout_predictor, model, model
     print(f"Done with point in {point_time - curr_time} seconds")
     
     print(f"Total algo time: {time() - total_algo_time} seconds")
-
-
-    # print(block_box_predictions)
-    # print(line_box_predictions)
-    # print(word_box_predictions)
-    # print(point_box_predictions)
-    # print(predicted_answer)
-    
 
     return predicted_answer, block_box_predictions, line_box_predictions, word_box_predictions, point_box_predictions, current_page
 
@@ -363,8 +342,9 @@ Answer:
     return ans
     
 
-def get_line_predictions(document_path, model, document_type):
-
+@st.cache_data(show_spinner="Running OCR for lines...")
+def cached_line_predictions(document_path, _model, document_type):
+    """Get line predictions from OCR model."""
     current_dir = os.getcwd()
     if document_type == "pdf":
         output_file = simple_counter_generator("page", ".jpg")
@@ -377,8 +357,6 @@ def get_line_predictions(document_path, model, document_type):
 
         if not os.path.exists(temp_output_folder):
             os.makedirs(temp_output_folder)
-        # output_file = simple_counter_generator("page", ".jpg")
-        # convert_from_path(document_path, output_folder=temp_output_folder, dpi=300, fmt='jpeg', jpegopt= jpg_options, output_file=output_file)
 
         doc = pymupdf.open(document_path)  # open document
         for page in doc:  # iterate through the pages
@@ -387,20 +365,9 @@ def get_line_predictions(document_path, model, document_type):
 
         images_path = sorted(os.listdir(temp_output_folder))
     else:
-
         images_path = [os.path.join(current_dir, document_path)]
-        print(images_path)
-
-    block_predictions = []
-    # print(document_path)
-    # if document_type == "pdf":
-    #     doc = DocumentFile.from_pdf(document_path)
-    # else:
-    #     doc = DocumentFile.from_images(document_path)
-    # result = model(doc)
 
     line_predictions = []
-
     pages_count = -1
     for image_path in images_path:
         pages_count += 1
@@ -410,8 +377,7 @@ def get_line_predictions(document_path, model, document_type):
         else:
             doc = DocumentFile.from_images(image_path)
 
-
-        result = model(doc)
+        result = _model(doc)
         for page in result.pages:     
             dim = tuple(reversed(page.dimensions))
             for block in page.blocks:
@@ -452,37 +418,31 @@ def get_line_predictions(document_path, model, document_type):
     return line_predictions, pages_count
 
 
-def get_block_predictions(document_path, layout_predictor, model, document_type):
+@st.cache_data(show_spinner="Running OCR for blocks...")
+def cached_block_predictions(document_path, _layout_predictor, _model, document_type):
+    """Get block predictions from layout predictor and OCR model."""
     current_dir = os.getcwd()
     if document_type == "pdf":
         output_file = simple_counter_generator("page", ".jpg")
         current_dir = os.getcwd()
         temp_output_folder = os.path.join(current_dir, "temp_output_folder/")
 
-        # delete the temp_output_folder
         if os.path.exists(temp_output_folder):
             shutil.rmtree(temp_output_folder)
 
         if not os.path.exists(temp_output_folder):
             os.makedirs(temp_output_folder)
-        # output_file = simple_counter_generator("page", ".jpg")
-        # convert_from_path(document_path, output_folder=temp_output_folder, dpi=300, fmt='jpeg', jpegopt= jpg_options, output_file=output_file)
 
-        doc = pymupdf.open(document_path)  # open document
-        for page in doc:  # iterate through the pages
-            pix = page.get_pixmap()  # render page to an image
+        doc = pymupdf.open(document_path)
+        for page in doc:
+            pix = page.get_pixmap()
             pix.save(f"{temp_output_folder}/{page.number}.png")  
 
         images_path = sorted(os.listdir(temp_output_folder))
     else:
-        
         images_path = [os.path.join(current_dir, document_path)]
-        # print(images_path)
 
     block_predictions = []
-    
-
-
     page_count = -1
     for image_path in images_path:
         page_count += 1
@@ -492,21 +452,16 @@ def get_block_predictions(document_path, layout_predictor, model, document_type)
         else:
             image = Image.open(os.path.join(current_dir, document_path))
 
-        # print(image_path)
-        # print(image)
-
-        layout_predictions = layout_predictor([image])
+        layout_predictions = _layout_predictor([image])
 
         for block in layout_predictions[0].bboxes:
             output = {}
             bbox = [int(x) for x in block.bbox]
             
-
             cropped_image = image.crop(bbox)
-
             cropped_image.save(f'temp.png')
             doc = DocumentFile.from_images('temp.png')
-            result = model(doc)
+            result = _model(doc)
 
             text = []
             for page in result.pages:
@@ -514,7 +469,6 @@ def get_block_predictions(document_path, layout_predictor, model, document_type)
                     for line in block.lines:
                         for word in line.words:
                             text.append(word.value)
-
 
             output['bbox'] = bbox
             output['text'] = " ".join(text)
@@ -526,6 +480,11 @@ def get_block_predictions(document_path, layout_predictor, model, document_type)
 def simple_counter_generator(prefix="", suffix=""):
     while True:
         yield 'p'
+
+def clear_prediction_caches():
+    """Clear all cached predictions."""
+    cached_line_predictions.clear()
+    cached_block_predictions.clear()
 
 
 
