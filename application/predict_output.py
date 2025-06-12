@@ -204,7 +204,7 @@ def predict_output(document_path, question, _pipe, _layout_predictor, _model, mo
     if model_type == "Drishtikon" or document_type=="pdf":
         processed_text_for_llm = get_processed_text_for_llm(block_predictions, gap=gap)
         predicted_answer = generate_llm_answer(question, processed_text_for_llm, _pipe)
-    elif model_type == "Patra":
+    elif model_type == "Param":
         predicted_answer = generate_via_inhouse_model_answer(question, document_path)
     llm_time = time()
     print(f"Done with LLM in {llm_time - curr_time} seconds")

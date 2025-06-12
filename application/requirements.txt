@@ -1,0 +1,11 @@
+torch
+torchvision
+transformers
+python-doctr
+surya-ocr
+streamlit
+pymupdf
+fuzzywuzzy
+pdf2image
+accelerate
+bitsandbytes

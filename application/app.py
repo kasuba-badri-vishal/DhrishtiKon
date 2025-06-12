@@ -4,16 +4,11 @@ import os
 import shutil
 import pymupdf
 import json
-from transformers import AutoTokenizer, AutoModelForCausalLM
 import datetime
 import logging
+import sys
 
 from predict_output import clear_prediction_caches, predict_output
-
-from PIL import Image, ImageDraw
-from surya.layout import LayoutPredictor
-from doctr.models import ocr_predictor
-from transformers import pipeline
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +18,7 @@ st.set_page_config(
     page_title="DrishtiKon Grounding Demo",
     layout="wide",
     initial_sidebar_state="expanded",
-    page_icon="logo.png"
+    page_icon="data/logo.png"
 )
 
 # Load credentials from secrets
@@ -32,6 +27,17 @@ try:
 except Exception as e:
     logger.error(f"Error loading credentials: {e}")
     st.error("Error loading credentials. Please check your secrets configuration.")
+    st.stop()
+
+# Import ML-related libraries with error handling
+try:
+    from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+    from PIL import Image, ImageDraw
+    from surya.layout import LayoutPredictor
+    from doctr.models import ocr_predictor
+except ImportError as e:
+    logger.error(f"Error importing ML libraries: {e}")
+    st.error("Error loading required ML libraries. Please check the installation.")
     st.stop()
 
 def login():
@@ -59,7 +65,7 @@ def login():
     with col2:
         # st.markdown('<div class="login-box">', unsafe_allow_html=True)
         # image at center
-        st.image("logo.png", width=800, use_container_width=False)
+        st.image("data/logo.png", width=800, use_container_width=False)
         st.markdown('<h2 style="text-align:center; color:#2b6cb0; margin-bottom:1.5em;">🔒 Please log in to access the app</h2>', unsafe_allow_html=True)
         username = st.text_input("Username", key="login_username")
         password = st.text_input("Password", type="password", key="login_password")
@@ -85,7 +91,7 @@ if not st.session_state["authenticated"]:
     st.stop()
 # --- End Authentication ---
 
-# st.image("logo.png", width=250)
+# st.image("data/logo.png", width=250)
 
 @st.cache_resource
 def get_layout_predictor():
@@ -109,28 +115,49 @@ def get_ocr_model():
 def get_llm_model(device):
     try:
         model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-        tokenizer = AutoTokenizer.from_pretrained(model_id, token=st.secrets["hf_token"])
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            device_map="auto",
-            load_in_4bit=True,
-            torch_dtype="auto",
-            token=st.secrets["hf_token"]
-        )
+        # First try to load tokenizer
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_id,
+                token=st.secrets["hf_token"],
+                trust_remote_code=True
+            )
+        except Exception as e:
+            logger.error(f"Error loading tokenizer: {e}")
+            st.error("Error loading tokenizer. Please check your Hugging Face token.")
+            return None
+
+        # Then try to load model
+        try:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                device_map="auto",
+                load_in_4bit=True,
+                torch_dtype="auto",
+                token=st.secrets["hf_token"],
+                trust_remote_code=True
+            )
+        except Exception as e:
+            logger.error(f"Error loading model: {e}")
+            st.error("Error loading language model. Please check your Hugging Face token.")
+            return None
+
         return pipeline("text-generation", model=model, tokenizer=tokenizer)
     except Exception as e:
-        logger.error(f"Error loading LLM model: {e}")
-        st.error("Error loading language model. Please check your Hugging Face token and try again.")
+        logger.error(f"Error in get_llm_model: {e}")
+        st.error("Error initializing language model pipeline.")
         return None
 
 # Initialize models with error handling
 try:
-    layout_predictor = get_layout_predictor()
-    model = get_ocr_model()
-    pipe = get_llm_model("cuda")
-    if not all([layout_predictor, model, pipe]):
-        st.error("Failed to initialize one or more models. Please try again later.")
-        st.stop()
+    with st.spinner("Loading models... This might take a few minutes."):
+        layout_predictor = get_layout_predictor()
+        model = get_ocr_model()
+        pipe = get_llm_model("cuda")
+        
+        if not all([layout_predictor, model, pipe]):
+            st.error("Failed to initialize one or more models. Please try again later.")
+            st.stop()
 except Exception as e:
     logger.error(f"Error initializing models: {e}")
     st.error("Error initializing models. Please try again later.")
@@ -226,7 +253,7 @@ st.markdown("""
 # Center the title image
 col_left, col_center, col_right = st.columns([1, 4, 1])
 with col_center:
-    st.image("title.png", width=800, use_container_width=True)
+    st.image("data/title.png", width=800, use_container_width=True)
 
 # List of quotes (HTML formatted)
 QUOTES = [
@@ -284,8 +311,8 @@ with col_center:
             justify-content: center; 
             align-items: center; 
             min-height: 80px; 
-            font-size: 1.3em; 
-            font-weight: 500; 
+            font-size: 1em; 
+            font-weight: 300; 
             color: #2b6cb0; 
             text-align: center;
             animation: fadeIn 1s;
@@ -371,13 +398,15 @@ with col1:
     st.subheader("2. Ask a question")
     question = st.text_input("Type your question here", help="Ask a question about the uploaded document.")
     
-    # Add radio button for model selection
-    model_type = st.radio(
-        "Select Model Type:",
-        options=["Drishtikon", "Patra"],
-        index=1,
-        horizontal=True
-    )
+    # # Add radio button for model selection
+    # model_type = st.radio(
+    #     "Select Model Type:",
+    #     options=["Drishtikon", "Param"],
+    #     index=1,
+    #     horizontal=True
+    # )
+
+    model_type = "Drishtikon"
 
     run_demo = st.button("Run Grounding Demo", use_container_width=True)
 
