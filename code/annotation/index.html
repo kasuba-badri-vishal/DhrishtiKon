@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grounding Annotation Tool</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h2>Annotation Tool</h2>
+            <div class="file-selector">
+                <label for="image-select">Select Image:</label>
+                <select id="image-select"></select>
+            </div>
+            <div class="qa-container">
+                <h3>Questions & Answers</h3>
+                <div id="qa-list"></div>
+            </div>
+            <div class="annotation-controls">
+                <h3>Annotation Controls</h3>
+                <div class="annotation-type">
+                    <label>Annotation Level:</label>
+                    <div class="radio-group">
+                        <input type="radio" id="block-level" name="annotation-level" value="block" checked>
+                        <label for="block-level">Block (<kbd>B</kbd>)</label>
+                        <input type="radio" id="line-level" name="annotation-level" value="line">
+                        <label for="line-level">Line (<kbd>L</kbd>)</label>
+                        <input type="radio" id="word-level" name="annotation-level" value="word">
+                        <label for="word-level">Word (<kbd>W</kbd>)</label>
+                        <input type="radio" id="point-level" name="annotation-level" value="point">
+                        <label for="point-level">Point (<kbd>P</kbd>)</label>
+                    </div>
+                </div>
+                <div class="ocr-controls">
+                    <button id="ocr-button">Generate Word Boxes from Lines (<kbd>O</kbd>)</button>
+                    <div id="ocr-status"></div>
+                </div>
+                <div class="zoom-controls">
+                    <label>Zoom Controls:</label>
+                    <div class="zoom-buttons">
+                        <button id="zoom-out">Zoom Out (<kbd>-</kbd>)</button>
+                        <span id="zoom-level">100%</span>
+                        <button id="zoom-in">Zoom In (<kbd>+</kbd>)</button>
+                        <button id="zoom-reset">Reset (<kbd>0</kbd>)</button>
+                    </div>
+                </div>
+                <button id="clear-current">Clear Current (<kbd>C</kbd>)</button>
+                <button id="save-annotations">Save Annotations (<kbd>S</kbd>)</button>
+                <div class="debug-section">
+                    <button id="debug-button">Show Annotation Data</button>
+                    <div id="debug-output"></div>
+                </div>
+            </div>
+            <div class="keyboard-shortcuts">
+                <h3>Keyboard Shortcuts</h3>
+                <ul>
+                    <li><kbd>B</kbd>: Block level</li>
+                    <li><kbd>L</kbd>: Line level</li>
+                    <li><kbd>W</kbd>: Word level</li>
+                    <li><kbd>P</kbd>: Point level</li>
+                    <li><kbd>O</kbd>: OCR line to words</li>
+                    <li><kbd>+</kbd> / <kbd>=</kbd>: Zoom in</li>
+                    <li><kbd>-</kbd>: Zoom out</li>
+                    <li><kbd>0</kbd>: Reset zoom</li>
+                    <li><kbd>S</kbd>: Save annotations</li>
+                    <li><kbd>C</kbd>: Clear current</li>
+                    <li><kbd>Delete</kbd>: Delete selected box</li>
+                </ul>
+            </div>
+        </div>
+        <div class="main-content">
+            <div class="canvas-container">
+                <canvas id="annotation-canvas"></canvas>
+                <div class="image-container">
+                    <img id="current-image" alt="Document image">
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html> 

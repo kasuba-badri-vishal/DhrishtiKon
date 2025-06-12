@@ -1,0 +1,19 @@
+{
+  "name": "grounding-annotation-tool",
+  "version": "1.0.0",
+  "description": "A tool for annotating images with bounding boxes for visual question-answering tasks",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "annotation",
+    "vqa",
+    "grounding",
+    "bounding-box"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+  }
+} 

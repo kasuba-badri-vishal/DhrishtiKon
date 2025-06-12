@@ -5,6 +5,9 @@ __pycache__/
 
 application/.streamlit/*
 
+data/output/*
+model/*.pt
+
 # C extensions
 *.so
 
